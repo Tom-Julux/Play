@@ -91,7 +91,6 @@ public class SingSceneController : MonoBehaviour, IOnHotSwapFinishedListener
             {
                 return 1000.0f * (double)audioPlayer.timeSamples / (double)audioPlayer.clip.frequency;
             }
-
         }
 
         set
@@ -100,9 +99,10 @@ public class SingSceneController : MonoBehaviour, IOnHotSwapFinishedListener
             {
                 return;
             }
-            audioPlayer.timeSamples = (int)((value * 1000.0f) * audioPlayer.clip.frequency);
+            int newTimeSamples = (int)((value / 1000.0) * audioPlayer.clip.frequency);
+            audioPlayer.timeSamples = newTimeSamples;
 
-            SyncVideoWithMusic();
+            SyncVideoWithMusicImmediately();
         }
     }
 
@@ -181,6 +181,12 @@ public class SingSceneController : MonoBehaviour, IOnHotSwapFinishedListener
         StartCoroutine(StartMusicAndVideo());
     }
 
+    private void InitTimeBar()
+    {
+        TimeBarTimeLine timeBarTimeLine = FindObjectOfType<TimeBarTimeLine>();
+        timeBarTimeLine.Init(SongMeta, PlayerControllers, DurationOfSongInMillis);
+    }
+
     private IEnumerator StartMusicAndVideo()
     {
         // Start the music
@@ -195,9 +201,6 @@ public class SingSceneController : MonoBehaviour, IOnHotSwapFinishedListener
         {
             StartVideoPlayback();
         }
-
-        // Go to next scene when the song finishes
-        Invoke("CheckSongFinished", (float)DurationOfSongInMillis * 1000.0f);
     }
 
     public void OnHotSwapFinished()
@@ -229,19 +232,8 @@ public class SingSceneController : MonoBehaviour, IOnHotSwapFinishedListener
 
     void Update()
     {
-        //UpdateMusic();
-        Debug.Log("Duration " + DurationOfSongInMillis);
-        Debug.Log("Position " + PositionInSongInMillis);
         UpdateVideoStart();
         PlayerControllers.ForEach(it => it.SetPositionInSongInMillis(PositionInSongInMillis));
-    }
-
-    private void UpdateMusic()
-    {
-        if (audioPlayer.clip == null)
-        {
-            return;
-        }
     }
 
     private void UpdateVideoStart()
@@ -295,7 +287,7 @@ public class SingSceneController : MonoBehaviour, IOnHotSwapFinishedListener
 
     private void CheckSongFinished()
     {
-        if (audioPlayer.clip == null)
+        if (audioPlayer.clip == null || DurationOfSongInMillis == 0)
         {
             return;
         }
@@ -368,7 +360,7 @@ public class SingSceneController : MonoBehaviour, IOnHotSwapFinishedListener
                 // No VideoGap, thus start the video immediately
                 videoPlayer.Play();
             }
-            InvokeRepeating("SyncVideoWithMusic", 5f, 10f);
+            InvokeRepeating("SyncVideoWithMusicSmoothly", 0.5f, 0.5f);
         }
     }
 
@@ -414,7 +406,7 @@ public class SingSceneController : MonoBehaviour, IOnHotSwapFinishedListener
         }
     }
 
-    private void SyncVideoWithMusic()
+    private void SyncVideoWithMusicSmoothly()
     {
         if (audioPlayer.clip == null || !videoPlayer.gameObject.activeInHierarchy)
         {
@@ -427,11 +419,29 @@ public class SingSceneController : MonoBehaviour, IOnHotSwapFinishedListener
             return;
         }
 
-        float positionInVideoInSeconds = (float)(SongMeta.VideoGap + PositionInSongInMillis / 1000);
-        if (videoPlayer.length > positionInVideoInSeconds)
+        double positionInVideoInSeconds = SongMeta.VideoGap + PositionInSongInMillis / 1000;
+        double timeDifferenceInSeconds = positionInVideoInSeconds - videoPlayer.time;
+        // Smooth out the time difference over a duration of 2 seconds
+        float playbackSpeed = 1 + (float)(timeDifferenceInSeconds / 2.0);
+        videoPlayer.playbackSpeed = playbackSpeed;
+    }
+
+    private void SyncVideoWithMusicImmediately()
+    {
+        if (audioPlayer.clip == null || !videoPlayer.gameObject.activeInHierarchy)
         {
-            videoPlayer.time = positionInVideoInSeconds;
+            return;
         }
+
+        if (SongMeta.VideoGap < 0 && PositionInSongInMillis < (-SongMeta.VideoGap * 1000))
+        {
+            // Still waiting for the start of the video
+            return;
+        }
+
+        double targetPositionInVideoInSeconds = SongMeta.VideoGap + PositionInSongInMillis / 1000;
+        videoPlayer.time = targetPositionInVideoInSeconds;
+        videoPlayer.playbackSpeed = 1f;
     }
 
     private void CreatePlayerController(PlayerProfile playerProfile, MicProfile micProfile)
@@ -543,6 +553,13 @@ public class SingSceneController : MonoBehaviour, IOnHotSwapFinishedListener
             else
             {
                 audioPlayer.clip = DownloadHandlerAudioClip.GetContent(www);
+
+                // The time bar needs the duration of the song to calculate positions.
+                // The duration of the song should be available now.
+                InitTimeBar();
+
+                // Go to next scene when the song finishes
+                CheckSongFinished();
             }
         }
 
