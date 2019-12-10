@@ -28,7 +28,7 @@ public class MicrophoneDemoSceneController : MonoBehaviour
         {
             return;
         }
-        microphonePitchTracker.MicDevice = micDeviceName;
+        microphonePitchTracker.MicProfile = new MicProfile(micDeviceName);
         pitchEventStreamDisposable = microphonePitchTracker.PitchEventStream.Subscribe(OnPitchDetected);
         microphonePitchTracker.StartPitchDetection();
     }
@@ -46,7 +46,7 @@ public class MicrophoneDemoSceneController : MonoBehaviour
     private void OnPitchDetected(PitchEvent pitchEvent)
     {
         // Show the note that has been detected
-        if (pitchEvent.MidiNote > 0)
+        if (pitchEvent != null && pitchEvent.MidiNote > 0)
         {
             currentNoteLabel.text = "Note: " + MidiUtils.GetAbsoluteName(pitchEvent.MidiNote);
         }

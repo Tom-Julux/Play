@@ -5,7 +5,7 @@ using UnityEngine;
 
 public class CamdAudioSamplesAnalyzer : IAudioSamplesAnalyzer
 {
-    /** There are 49 halftones in the hearable audio spectrum (C2 to C6 (1046.5023 Hz)). */
+    /** There are 49 halftones in the singable audio spectrum (C2 to C6 (1046.5023 Hz)). */
     private const int NumHalftones = 49;
     /** A4 concert pitch of 440 Hz. */
     private const float BaseToneFreq = 440f;
@@ -14,16 +14,14 @@ public class CamdAudioSamplesAnalyzer : IAudioSamplesAnalyzer
     private static readonly double[] halftoneFrequencies = PrecalculateHalftoneFrequencies();
 
     private readonly int[] halftoneDelays;
-    private readonly Subject<PitchEvent> pitchEventStream;
     private readonly List<int> pitchRecordHistory = new List<int>();
     private readonly int pitchRecordHistoryLength = 5;
 
     private bool isEnabled;
     private int lastPitchDetectedFrame;
 
-    public CamdAudioSamplesAnalyzer(Subject<PitchEvent> pitchEventStream, int sampleRateHz)
+    public CamdAudioSamplesAnalyzer(int sampleRateHz)
     {
-        this.pitchEventStream = pitchEventStream;
         halftoneDelays = PrecalculateHalftoneDelays(halftoneFrequencies, sampleRateHz);
     }
 
@@ -57,29 +55,30 @@ public class CamdAudioSamplesAnalyzer : IAudioSamplesAnalyzer
         isEnabled = false;
     }
 
-    public void ProcessAudioSamples(float[] audioSamplesBuffer, int samplesSinceLastFrame)
+    public PitchEvent ProcessAudioSamples(float[] audioSamplesBuffer, int samplesSinceLastFrame, MicProfile mic)
     {
-        if (!isEnabled || samplesSinceLastFrame < MinSampleLength)
+        if (!isEnabled || samplesSinceLastFrame < MinSampleLength || lastPitchDetectedFrame == Time.frameCount)
         {
-            return;
+            return null;
         }
+        lastPitchDetectedFrame = Time.frameCount;
         int sampleCountToUse = PreviousPowerOfTwo(samplesSinceLastFrame);
 
         // check if samples is louder than threshhold
-        bool passesThreshhold = false;
+        bool passesThreshold = false;
+        float minThreshold = mic.NoiseSuppression / 100f;
         for (int index = 0; index < sampleCountToUse; index++)
         {
-            if (Math.Abs(audioSamplesBuffer[index]) >= 0.05f)
+            if (Math.Abs(audioSamplesBuffer[index]) >= minThreshold)
             {
-                passesThreshhold = true;
+                passesThreshold = true;
                 break;
             }
         }
-        if (!passesThreshhold)
+        if (!passesThreshold)
         {
-            // Subscribers (such as the PlayerNoteRecorder) must know that the singing ended.
-            // Therefore, a midi pitch of 0 is interpreted as "no singing".
-            OnPitchDetected(0);
+            OnNoPitchDetected();
+            return null;
         }
 
         // get best fitting tone
@@ -89,9 +88,15 @@ public class CamdAudioSamplesAnalyzer : IAudioSamplesAnalyzer
         int halftone = CalculateBestFittingHalftone(correlation) + BaseToneMidi + 3;
         if (halftone != -1 && isEnabled)
         {
-            OnPitchDetected(halftone);
+            int midiNoteMedian = GetMidiNoteAverageFromHistory(halftone);
+            if (midiNoteMedian > 0)
+            {
+                return new PitchEvent(midiNoteMedian);
+            }
         }
-        // else: no tone detected.
+
+        OnNoPitchDetected();
+        return null;
     }
 
     private static int PreviousPowerOfTwo(int x)
@@ -145,29 +150,31 @@ public class CamdAudioSamplesAnalyzer : IAudioSamplesAnalyzer
         return correlation;
     }
 
-    private void OnPitchDetected(int midiPitch)
+    private int GetMidiNoteAverageFromHistory(int midiNote)
     {
-        // Ignore multiple events in same frame.
-        if (lastPitchDetectedFrame == Time.frameCount)
-        {
-            return;
-        }
-        lastPitchDetectedFrame = Time.frameCount;
-
         // Create history of PitchRecord events
-        pitchRecordHistory.Add(midiPitch);
-        while (pitchRecordHistoryLength > 0 && pitchRecordHistory.Count > pitchRecordHistoryLength)
-        {
-            pitchRecordHistory.RemoveAt(0);
-        }
+        AddMidiNoteToHistory(midiNote);
 
         // Calculate median of recorded midi note values.
         // This is done to make the pitch detection more stable, but it increases the latency.
         List<int> sortedPitchRecordHistory = new List<int>(pitchRecordHistory);
-        sortedPitchRecordHistory.Sort((pitchRecord1, pitchRecord2) => pitchRecord1.CompareTo(pitchRecord2));
         int midiNoteMedian = sortedPitchRecordHistory[sortedPitchRecordHistory.Count / 2];
 
-        PitchEvent pitchEvent = new PitchEvent(midiNoteMedian);
-        pitchEventStream.OnNext(pitchEvent);
+        return midiNoteMedian;
+    }
+
+    private void AddMidiNoteToHistory(int midiNote)
+    {
+        pitchRecordHistory.Add(midiNote);
+        while (pitchRecordHistoryLength > 0 && pitchRecordHistory.Count > pitchRecordHistoryLength)
+        {
+            pitchRecordHistory.RemoveAt(0);
+        }
+    }
+
+    private void OnNoPitchDetected()
+    {
+        // No tone detected.
+        pitchRecordHistory.Clear();
     }
 }

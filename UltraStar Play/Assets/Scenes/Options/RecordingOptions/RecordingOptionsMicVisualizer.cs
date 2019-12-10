@@ -18,7 +18,7 @@ public class RecordingOptionsMicVisualizer : MonoBehaviour
 
     public void SetMicProfile(MicProfile micProfile)
     {
-        microphonePitchTracker.MicDevice = micProfile.Name;
+        microphonePitchTracker.MicProfile = micProfile;
         if (!string.IsNullOrEmpty(micProfile.Name))
         {
             microphonePitchTracker.StartPitchDetection();
@@ -38,7 +38,7 @@ public class RecordingOptionsMicVisualizer : MonoBehaviour
     private void OnPitchDetected(PitchEvent pitchEvent)
     {
         // Show the note that has been detected
-        if (pitchEvent.MidiNote > 0)
+        if (pitchEvent != null && pitchEvent.MidiNote > 0)
         {
             currentNoteLabel.text = "Note: " + MidiUtils.GetAbsoluteName(pitchEvent.MidiNote);
         }
