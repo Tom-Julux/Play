@@ -112,12 +112,25 @@ static class SongMetaBuilder
                 }
             }
 
+            //Read the song file body
+            StringBuilder songBody = new StringBuilder();
+            string bodyLine;
+            while ((bodyLine = reader.ReadLine()) != null)
+            {
+                songBody.Append(bodyLine); //Ignorning the newlines for the hash
+            }
+
+            //Hash the song file body
+            string songHash = Hashing.Md5(Encoding.UTF8.GetBytes(songBody.ToString()));
+            Debug.Log("Hash for " + requiredFields["title"] + " is " + songHash);
+
 
             try
             {
                 SongMeta res = new SongMeta(
                     directory,
                     filename,
+                    songHash,
                     requiredFields["artist"],
                     ConvertToFloat(requiredFields["bpm"]),
                     requiredFields["mp3"],
@@ -162,9 +175,9 @@ static class SongMetaBuilder
                         case "year":
                             res.Year = ConvertToUInt32(item.Value);
                             break;
-                        // unknown or unimplemented fields just get ignored completely
                         default:
-                            continue;
+                            res.AddUnkownHeaderEntry(item.Key, item.Value);
+                            break;
                     }
                 }
                 return res;
